@@ -15,3 +15,4 @@ include_directories( {$SDL2_INCLUDE_DIR} )
 
 target_link_libraries( opengl-playground GLEW GL )
 target_link_libraries( opengl-playground SDL2 SDL2main)
+target_link_libraries( opengl-playground assimp )

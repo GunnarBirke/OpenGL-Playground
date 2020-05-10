@@ -11,6 +11,10 @@
 
 #include <GL/gl.h>
 
+#include "assimp/Importer.hpp"
+#include "assimp/scene.h"
+#include "assimp/postprocess.h"
+
 using namespace std;
 
 struct vector3
@@ -216,6 +220,14 @@ void resize(int width, int height)
 
 int main()
 {
+	Assimp::Importer importer;
+
+	const aiScene* scene = importer.ReadFile("trinity.x",
+											 aiProcess_CalcTangentSpace       |
+											 aiProcess_Triangulate            |
+											 aiProcess_JoinIdenticalVertices  |
+											 aiProcess_SortByPType);
+
 	SDL_Init(SDL_INIT_VIDEO);
 
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
