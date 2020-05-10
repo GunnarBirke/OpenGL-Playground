@@ -1,5 +1,6 @@
 #include <iostream>
 #include <vector>
+#include <cmath>
 
 #include <GL/glew.h>
 
@@ -170,7 +171,7 @@ std::pair<std::vector<vertex>, std::vector<GLushort>> create_circle_mesh_data(in
 	std::vector<GLushort> indexData(3*resolution);
 	std::vector<vertex> vertexData(resolution + 1);
 
-	vertexData.front() = { vector3(1.0f, 0.0f, 0.0f), vector3(0.0f, 0.0f, 0.0f) };
+	vertexData.front() = { vector3(1.0f, 0.0f, 0.0f), vector3(0.0f, 0.0f, -5.0f) };
 
 	float angleStep = (2*M_PI) / (resolution);
 
@@ -178,7 +179,7 @@ std::pair<std::vector<vertex>, std::vector<GLushort>> create_circle_mesh_data(in
 	{
 		float x_coord = cos(i*angleStep);
 		float y_coord = sin(i*angleStep);
-		vertexData[i+1].pos =  vector3(x_coord, y_coord, 0.0f);
+		vertexData[i+1].pos =  vector3(x_coord, y_coord, -5.0f);
 		vertexData[i+1].color = vector3(1.0f, 0.0f, 0.0f);
 	}
 
@@ -197,6 +198,21 @@ std::pair<std::vector<vertex>, std::vector<GLushort>> create_circle_mesh_data(in
 	return std::make_pair(vertexData, indexData);
 }
 
+void resize(int width, int height)
+{
+	float horizontal_view_angle = M_PI * 0.5f;
+	float aspect_ratio = float(height) / float(width);
+	float near_plane = 1.0f;
+	float far_plane = 100.0f;
+	float right = near_plane * tanf(horizontal_view_angle * 0.5f);
+
+	glViewport(0, 0, width, height);
+	glMatrixMode(GL_PROJECTION);
+	glLoadIdentity();
+	glFrustum(-right, right, right*aspect_ratio, -right*aspect_ratio, near_plane, far_plane);
+	glMatrixMode(GL_MODELVIEW);
+}
+
 
 int main()
 {
@@ -211,6 +227,8 @@ int main()
 	SDL_GLContext glContext = SDL_GL_CreateContext(window);
 
 	glewInit();
+
+	resize(800, 600);
 
 	SDL_Event event;
 	bool running = true;
