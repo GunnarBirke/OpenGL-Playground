@@ -224,6 +224,7 @@ public:
 		}
 	}
 
+	friend void load_mesh_from_assimp_node(model_node** mesh_node, const aiNode* assimp_node, const aiScene* scene);
 	friend model_node* traverse_assimp_scene(const aiNode* curr, const aiScene* scene);
 
 private:
@@ -277,38 +278,32 @@ private:
 	model_node* root = nullptr;
 };
 
-mesh* load_mesh_from_assimp_node(const aiNode* node, const aiScene* scene)
+void load_mesh_from_assimp_node(model_node** mesh_node, const aiNode* assimp_node, const aiScene* scene)
 {
-	int vertex_count = 0;
-	int index_count = 0;
+	int i = 0;
 
-	for (const unsigned* iter = node->mMeshes; iter < node->mMeshes + node->mNumMeshes; ++iter)
+	for (const unsigned* iter = assimp_node->mMeshes; iter < assimp_node->mMeshes + assimp_node->mNumMeshes; ++iter)
 	{
-		vertex_count += scene->mMeshes[*iter]->mNumVertices;
+		int vertex_count = scene->mMeshes[*iter]->mNumVertices;
 		// assume all faces to be triangles
-		index_count += scene->mMeshes[*iter]->mNumFaces * 3;
-	}
+		int index_count = scene->mMeshes[*iter]->mNumFaces * 3;
 
-	if (vertex_count == 0 || index_count == 0)
-	{
-		return nullptr;
-	}
+		if (vertex_count == 0 || index_count == 0)
+		{
+			continue;
+		}
 
-	// not sure how to handle different vertex formats
-	// for the moment give it three floats for position
-	// plus 3 floats for a color
-	int vertex_size = 6 * sizeof(float);
-	uint8_t* vertex_data = new uint8_t[vertex_count * vertex_size];
-	uint8_t* vertex_data_begin = vertex_data;
-	uint16_t* index_data = new uint16_t[index_count];
-	uint16_t* index_data_begin = index_data;
+		// not sure how to handle different vertex formats
+		// for the moment give it three floats for position
+		// plus 3 floats for a color
+		int vertex_size = 6 * sizeof(float);
+		uint8_t* vertex_data = new uint8_t[vertex_count * vertex_size];
+		uint8_t* vertex_data_begin = vertex_data;
+		uint16_t* index_data = new uint16_t[index_count];
+		uint16_t* index_data_begin = index_data;
 
-	int index_offset = 0;
-
-	for (const unsigned* iter = node->mMeshes; iter < node->mMeshes + node->mNumMeshes; ++iter)
-	{
 		for (const aiVector3D* iter2 = scene->mMeshes[*iter]->mVertices;
-			 iter2 < scene->mMeshes[*iter]->mVertices + scene->mMeshes[*iter]->mNumVertices; ++iter2)
+			 iter2 < scene->mMeshes[*iter]->mVertices + vertex_count; ++iter2)
 		{
 			*reinterpret_cast<float*>(vertex_data) = 1.0f;
 			vertex_data += 4;
@@ -328,24 +323,24 @@ mesh* load_mesh_from_assimp_node(const aiNode* node, const aiScene* scene)
 			 iter2 < scene->mMeshes[*iter]->mFaces + scene->mMeshes[*iter]->mNumFaces; ++iter2)
 		{
 			// again, assume all faces to be triangles
-			*index_data = *iter2->mIndices + index_offset;
+			*index_data = *iter2->mIndices;
 			++index_data;
-			*index_data = *(iter2->mIndices+1) + index_offset;
+			*index_data = *(iter2->mIndices+1);
 			++index_data;
-			*index_data = *(iter2->mIndices+2) + index_offset;
+			*index_data = *(iter2->mIndices+2);
 			++index_data;
 		}
 
-		index_offset += scene->mMeshes[*iter]->mNumVertices;
+		*mesh_node = new model_node;
+		(*mesh_node)->m = new mesh(vertex_data_begin, vertex_count, vertex_size,
+								   index_data_begin, index_count, sizeof(uint16_t));
+		mesh_node = &(*mesh_node)->next_sibling;
 	}
-
-	return new mesh(vertex_data_begin, vertex_count, vertex_size, index_data_begin, index_count, sizeof(uint16_t));
 }
 
 model_node* traverse_assimp_scene(const aiNode* curr, const aiScene* scene)
 {
 	model_node* ret = new model_node;
-	ret->m = load_mesh_from_assimp_node(curr, scene);
 	model_node** curr_child = &ret->first_child;
 
 	for (aiNode** iter = curr->mChildren;  iter < curr->mChildren + curr->mNumChildren; ++iter)
@@ -353,6 +348,8 @@ model_node* traverse_assimp_scene(const aiNode* curr, const aiScene* scene)
 		*curr_child = traverse_assimp_scene(*iter, scene);
 		curr_child = &((*curr_child)->next_sibling);
 	}
+
+	load_mesh_from_assimp_node(curr_child, curr, scene);
 
 	return ret;
 }
