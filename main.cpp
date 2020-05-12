@@ -370,15 +370,8 @@ texture* load_texture(const char* file)
 
 void load_mesh_from_assimp_node(model_node** mesh_node, const aiNode* assimp_node, const aiScene* scene)
 {
-	int  i = 0;
 	for (const unsigned* iter = assimp_node->mMeshes; iter < assimp_node->mMeshes + assimp_node->mNumMeshes; ++iter)
 	{
-
-		if (i++ % 4 != 0)
-		{
-			continue;
-		}
-
 		int vertex_count = scene->mMeshes[*iter]->mNumVertices;
 		// assume all faces to be triangles
 		int index_count = scene->mMeshes[*iter]->mNumFaces * 3;
@@ -589,6 +582,7 @@ int main()
 	glTranslatef(0.0f, 0.0f, -90.0f);
 	//glLoadMatrixf(mat.elements);
 
+	glEnable(GL_DEPTH_TEST);
 	glEnable(GL_TEXTURE_2D);
 	glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
 
