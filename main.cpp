@@ -165,7 +165,7 @@ public:
 	{
 		glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBuffer);
-		glInterleavedArrays(GL_C3F_V3F, 0, 0);
+		glInterleavedArrays(GL_V3F, 0, 0);
 
 		glDrawElements(GL_TRIANGLES, indexCnt, GL_UNSIGNED_SHORT, 0);
 
@@ -179,6 +179,25 @@ private:
 	GLuint vertexBuffer;
 	GLuint indexBuffer;
 	int indexCnt;
+};
+
+class material
+{
+public:
+	void set()
+	{
+		glMaterialfv(GL_FRONT, GL_DIFFUSE, diffuse);
+		glMaterialfv(GL_FRONT, GL_EMISSION, emissive);
+		glMaterialfv(GL_FRONT, GL_AMBIENT, ambient);
+		glMaterialfv(GL_FRONT, GL_SPECULAR, specular);
+		glMaterialf(GL_FRONT, GL_SHININESS, shininess);
+	}
+
+	float diffuse[4];
+	float emissive[4];
+	float ambient[4];
+	float specular[4];
+	float shininess;
 };
 
 class model_node
@@ -220,6 +239,7 @@ public:
 
 		if (m)
 		{
+			mat.set();
 			m->render();
 		}
 	}
@@ -232,6 +252,7 @@ private:
 	model_node* first_child = nullptr;
 
 	mesh* m = nullptr;
+	material mat;
 };
 
 class model
@@ -280,8 +301,6 @@ private:
 
 void load_mesh_from_assimp_node(model_node** mesh_node, const aiNode* assimp_node, const aiScene* scene)
 {
-	int i = 0;
-
 	for (const unsigned* iter = assimp_node->mMeshes; iter < assimp_node->mMeshes + assimp_node->mNumMeshes; ++iter)
 	{
 		int vertex_count = scene->mMeshes[*iter]->mNumVertices;
@@ -296,7 +315,7 @@ void load_mesh_from_assimp_node(model_node** mesh_node, const aiNode* assimp_nod
 		// not sure how to handle different vertex formats
 		// for the moment give it three floats for position
 		// plus 3 floats for a color
-		int vertex_size = 6 * sizeof(float);
+		int vertex_size = 3 * sizeof(float);
 		uint8_t* vertex_data = new uint8_t[vertex_count * vertex_size];
 		uint8_t* vertex_data_begin = vertex_data;
 		uint16_t* index_data = new uint16_t[index_count];
@@ -305,12 +324,6 @@ void load_mesh_from_assimp_node(model_node** mesh_node, const aiNode* assimp_nod
 		for (const aiVector3D* iter2 = scene->mMeshes[*iter]->mVertices;
 			 iter2 < scene->mMeshes[*iter]->mVertices + vertex_count; ++iter2)
 		{
-			*reinterpret_cast<float*>(vertex_data) = 1.0f;
-			vertex_data += 4;
-			*reinterpret_cast<float*>(vertex_data) = 0.0f;
-			vertex_data += 4;
-			*reinterpret_cast<float*>(vertex_data) = 0.0f;
-			vertex_data += 4;
 			*reinterpret_cast<float*>(vertex_data) = iter2->x;
 			vertex_data += 4;
 			*reinterpret_cast<float*>(vertex_data) = iter2->y;
@@ -331,9 +344,44 @@ void load_mesh_from_assimp_node(model_node** mesh_node, const aiNode* assimp_nod
 			++index_data;
 		}
 
+		aiMaterial* assimp_mat = scene->mMaterials[scene->mMeshes[*iter]->mMaterialIndex];
+
+		aiColor3D diffuse;
+		assimp_mat->Get(AI_MATKEY_COLOR_DIFFUSE, diffuse);
+		aiColor3D emissive;
+		assimp_mat->Get(AI_MATKEY_COLOR_EMISSIVE, emissive);
+		aiColor3D ambient;
+		assimp_mat->Get(AI_MATKEY_COLOR_AMBIENT, ambient);
+		aiColor3D specular;
+		assimp_mat->Get(AI_MATKEY_COLOR_SPECULAR, specular);
+
+		material mat;
+		mat.diffuse[0] = diffuse.r;
+		mat.diffuse[1] = diffuse.g;
+		mat.diffuse[2] = diffuse.b;
+		mat.diffuse[3] = 1.0f;
+
+		mat.emissive[0] = emissive.r;
+		mat.emissive[1] = emissive.g;
+		mat.emissive[2] = emissive.b;
+		mat.emissive[3] = 1.0f;
+
+		mat.ambient[0] = ambient.r;
+		mat.ambient[1] = ambient.g;
+		mat.ambient[2] = ambient.b;
+		mat.ambient[3] = 1.0f;
+
+		mat.specular[0] = specular.r;
+		mat.specular[1] = specular.g;
+		mat.specular[2] = specular.b;
+		mat.specular[3] = 1.0f;
+
+		assimp_mat->Get(AI_MATKEY_SHININESS, mat.shininess);
+
 		*mesh_node = new model_node;
 		(*mesh_node)->m = new mesh(vertex_data_begin, vertex_count, vertex_size,
 								   index_data_begin, index_count, sizeof(uint16_t));
+		(*mesh_node)->mat = mat;
 		mesh_node = &(*mesh_node)->next_sibling;
 	}
 }
