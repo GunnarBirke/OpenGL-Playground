@@ -304,7 +304,7 @@ private:
 	model_node* first_child = nullptr;
 
 	mesh* m = nullptr;
-	material* mat;
+	material* mat = nullptr;
 };
 
 class model
@@ -365,7 +365,23 @@ texture* load_texture(const char* file)
 		return nullptr;
 	}
 
-	return new texture(data, width, height);
+	uint8_t* data_fixed = new uint8_t[width * height * 4];
+
+	for (int i = 0; i < width * 4; i += 4)
+	{
+		for (int j = 0; j < height; ++j)
+		{
+			data_fixed[j * width * 4 + i] = data[(height - j - 1) * width * 4 + i];
+			data_fixed[j * width * 4 + i + 1] = data[(height - j - 1) * width * 4 + i + 1];
+			data_fixed[j * width * 4 + i + 2] = data[(height - j - 1) * width * 4 + i + 2];
+			data_fixed[j * width * 4 + i + 3] = data[(height - j - 1) * width * 4 + i + 3];
+		}
+	}
+
+	texture* tex = new texture(data_fixed, width, height);
+	stbi_image_free(data);
+	delete[] data_fixed;
+	return tex;
 }
 
 void load_mesh_from_assimp_node(model_node** mesh_node, const aiNode* assimp_node, const aiScene* scene)
