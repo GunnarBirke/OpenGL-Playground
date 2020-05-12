@@ -281,7 +281,6 @@ mesh* load_mesh_from_assimp_node(const aiNode* node, const aiScene* scene)
 		vertex_count += scene->mMeshes[*iter]->mNumVertices;
 		// assume all faces to be triangles
 		index_count += scene->mMeshes[*iter]->mNumFaces * 3;
-		break;
 	}
 
 	if (vertex_count == 0 || index_count == 0)
@@ -297,6 +296,8 @@ mesh* load_mesh_from_assimp_node(const aiNode* node, const aiScene* scene)
 	uint8_t* vertex_data_begin = vertex_data;
 	uint16_t* index_data = new uint16_t[index_count];
 	uint16_t* index_data_begin = index_data;
+
+	int index_offset = 0;
 
 	for (const unsigned* iter = node->mMeshes; iter < node->mMeshes + node->mNumMeshes; ++iter)
 	{
@@ -321,15 +322,15 @@ mesh* load_mesh_from_assimp_node(const aiNode* node, const aiScene* scene)
 			 iter2 < scene->mMeshes[*iter]->mFaces + scene->mMeshes[*iter]->mNumFaces; ++iter2)
 		{
 			// again, assume all faces to be triangles
-			*index_data = *iter2->mIndices;
+			*index_data = *iter2->mIndices + index_offset;
 			++index_data;
-			*index_data = *(iter2->mIndices+1);
+			*index_data = *(iter2->mIndices+1) + index_offset;
 			++index_data;
-			*index_data = *(iter2->mIndices+2);
+			*index_data = *(iter2->mIndices+2) + index_offset;
 			++index_data;
 		}
 
-		break;
+		index_offset += scene->mMeshes[*iter]->mNumVertices;
 	}
 
 	return new mesh(vertex_data_begin, vertex_count, vertex_size, index_data_begin, index_count, sizeof(uint16_t));
