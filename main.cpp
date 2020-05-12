@@ -15,6 +15,8 @@
 #include "assimp/scene.h"
 #include "assimp/postprocess.h"
 
+#include "stb_image.h"
+
 using namespace std;
 
 struct vector3
@@ -165,7 +167,7 @@ public:
 	{
 		glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBuffer);
-		glInterleavedArrays(GL_V3F, 0, 0);
+		glInterleavedArrays(GL_T2F_V3F, 0, 0);
 
 		glDrawElements(GL_TRIANGLES, indexCnt, GL_UNSIGNED_SHORT, 0);
 
@@ -181,9 +183,49 @@ private:
 	int indexCnt;
 };
 
+class texture
+{
+public:
+	texture(void* pixels, int width, int height)
+	{
+		glGenTextures(1, &tex);
+		glBindTexture(GL_TEXTURE_2D, tex);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		glBindTexture(GL_TEXTURE_2D, 0);
+	}
+
+	texture(const texture& ) = delete;
+	texture& operator=(const texture& ) = delete;
+	texture(texture&& ) = delete;
+	texture& operator=(texture&& ) = delete;
+
+	~texture()
+	{
+		glDeleteTextures(1, &tex);
+	}
+
+	void set()
+	{
+		glBindTexture(GL_TEXTURE_2D, tex);
+	}
+
+private:
+	GLuint tex;
+};
+
 class material
 {
 public:
+	~material()
+	{
+		if (tex != nullptr)
+		{
+			delete tex;
+		}
+	}
+
 	void set()
 	{
 		glMaterialfv(GL_FRONT, GL_DIFFUSE, diffuse);
@@ -191,6 +233,7 @@ public:
 		glMaterialfv(GL_FRONT, GL_AMBIENT, ambient);
 		glMaterialfv(GL_FRONT, GL_SPECULAR, specular);
 		glMaterialf(GL_FRONT, GL_SHININESS, shininess);
+		tex->set();
 	}
 
 	float diffuse[4];
@@ -198,6 +241,7 @@ public:
 	float ambient[4];
 	float specular[4];
 	float shininess;
+	texture* tex = nullptr;
 };
 
 class model_node
@@ -224,7 +268,15 @@ public:
 			child = tmp;
 		}
 
-		delete m;
+		if (m != nullptr)
+		{
+			delete m;
+		}
+
+		if (mat != nullptr)
+		{
+			delete mat;
+		}
 	}
 
 	void render()
@@ -239,7 +291,7 @@ public:
 
 		if (m)
 		{
-			mat.set();
+			mat->set();
 			m->render();
 		}
 	}
@@ -252,7 +304,7 @@ private:
 	model_node* first_child = nullptr;
 
 	mesh* m = nullptr;
-	material mat;
+	material* mat;
 };
 
 class model
@@ -299,6 +351,23 @@ private:
 	model_node* root = nullptr;
 };
 
+texture* load_texture(const char* file)
+{
+	int width = 0;
+	int height = 0;
+	int compression = 0;
+
+	uint8_t* data = stbi_load(file, &width, &height, &compression, STBI_rgb_alpha);
+
+	if (data == nullptr)
+	{
+		std::cout << stbi_failure_reason() << std::endl;
+		return nullptr;
+	}
+
+	return new texture(data, width, height);
+}
+
 void load_mesh_from_assimp_node(model_node** mesh_node, const aiNode* assimp_node, const aiScene* scene)
 {
 	for (const unsigned* iter = assimp_node->mMeshes; iter < assimp_node->mMeshes + assimp_node->mNumMeshes; ++iter)
@@ -313,9 +382,9 @@ void load_mesh_from_assimp_node(model_node** mesh_node, const aiNode* assimp_nod
 		}
 
 		// not sure how to handle different vertex formats
-		// for the moment give it three floats for position
-		// plus 3 floats for a color
-		int vertex_size = 3 * sizeof(float);
+		// maybe just assume position + texture coords + normals?
+		// what does wme do?
+		int vertex_size = 5 * sizeof(float);
 		uint8_t* vertex_data = new uint8_t[vertex_count * vertex_size];
 		uint8_t* vertex_data_begin = vertex_data;
 		uint16_t* index_data = new uint16_t[index_count];
@@ -324,12 +393,24 @@ void load_mesh_from_assimp_node(model_node** mesh_node, const aiNode* assimp_nod
 		for (const aiVector3D* iter2 = scene->mMeshes[*iter]->mVertices;
 			 iter2 < scene->mMeshes[*iter]->mVertices + vertex_count; ++iter2)
 		{
+			vertex_data += 8;
 			*reinterpret_cast<float*>(vertex_data) = iter2->x;
 			vertex_data += 4;
 			*reinterpret_cast<float*>(vertex_data) = iter2->y;
 			vertex_data += 4;
 			*reinterpret_cast<float*>(vertex_data) = iter2->z;
 			vertex_data += 4;
+		}
+
+		vertex_data = vertex_data_begin;
+
+		for (const aiVector3D* iter2 = scene->mMeshes[*iter]->mTextureCoords[0];
+			 iter2 < scene->mMeshes[*iter]->mTextureCoords[0] + vertex_count; ++iter2)
+		{
+			*reinterpret_cast<float*>(vertex_data) = iter2->x;
+			vertex_data += 4;
+			*reinterpret_cast<float*>(vertex_data) = iter2->y;
+			vertex_data += 16;
 		}
 
 		for (const aiFace* iter2 = scene->mMeshes[*iter]->mFaces;
@@ -355,28 +436,35 @@ void load_mesh_from_assimp_node(model_node** mesh_node, const aiNode* assimp_nod
 		aiColor3D specular;
 		assimp_mat->Get(AI_MATKEY_COLOR_SPECULAR, specular);
 
-		material mat;
-		mat.diffuse[0] = diffuse.r;
-		mat.diffuse[1] = diffuse.g;
-		mat.diffuse[2] = diffuse.b;
-		mat.diffuse[3] = 1.0f;
+		material* mat = new material;
+		mat->diffuse[0] = diffuse.r;
+		mat->diffuse[1] = diffuse.g;
+		mat->diffuse[2] = diffuse.b;
+		mat->diffuse[3] = 1.0f;
 
-		mat.emissive[0] = emissive.r;
-		mat.emissive[1] = emissive.g;
-		mat.emissive[2] = emissive.b;
-		mat.emissive[3] = 1.0f;
+		mat->emissive[0] = emissive.r;
+		mat->emissive[1] = emissive.g;
+		mat->emissive[2] = emissive.b;
+		mat->emissive[3] = 1.0f;
 
-		mat.ambient[0] = ambient.r;
-		mat.ambient[1] = ambient.g;
-		mat.ambient[2] = ambient.b;
-		mat.ambient[3] = 1.0f;
+		mat->ambient[0] = ambient.r;
+		mat->ambient[1] = ambient.g;
+		mat->ambient[2] = ambient.b;
+		mat->ambient[3] = 1.0f;
 
-		mat.specular[0] = specular.r;
-		mat.specular[1] = specular.g;
-		mat.specular[2] = specular.b;
-		mat.specular[3] = 1.0f;
+		mat->specular[0] = specular.r;
+		mat->specular[1] = specular.g;
+		mat->specular[2] = specular.b;
+		mat->specular[3] = 1.0f;
 
-		assimp_mat->Get(AI_MATKEY_SHININESS, mat.shininess);
+		assimp_mat->Get(AI_MATKEY_SHININESS, mat->shininess);
+
+		for (int i = 0 ; i < assimp_mat->GetTextureCount(aiTextureType_DIFFUSE); ++i)
+		{
+			aiString texture_path;
+			assimp_mat->Get(AI_MATKEY_TEXTURE(aiTextureType_DIFFUSE, i), texture_path);
+			mat->tex = load_texture(texture_path.C_Str());
+		}
 
 		*mesh_node = new model_node;
 		(*mesh_node)->m = new mesh(vertex_data_begin, vertex_count, vertex_size,
@@ -493,6 +581,9 @@ int main()
 	glLoadIdentity();
 	glTranslatef(0.0f, 0.0f, -90.0f);
 	//glLoadMatrixf(mat.elements);
+
+	glEnable(GL_TEXTURE_2D);
+	glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
 
 	while(running)
 	{

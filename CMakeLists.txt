@@ -5,10 +5,12 @@ project(opengl-playground LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-add_executable(opengl-playground main.cpp)
+add_executable(opengl-playground main.cpp stb_image.h)
 
 find_package(OpenGL REQUIRED)
 find_package(SDL2 REQUIRED)
+
+set(HEADER_FILES stb_image.h)
 
 include_directories( {$OPENGL_INCLUDE_DIR} )
 include_directories( {$SDL2_INCLUDE_DIR} )
