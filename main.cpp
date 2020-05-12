@@ -129,8 +129,8 @@ struct vertex
 class mesh
 {
 public:
-	mesh(void* vertexData, int vertexCnt, int vertexSize, void* indexData, int indexCnt, int indexSize)
-		: indexCnt(indexCnt)
+	mesh(uint8_t* vertex_data, int vertexCnt, int vertexSize, uint16_t* index_data, int indexCnt, int indexSize)
+		: vertex_data(vertex_data), index_data(index_data), indexCnt(indexCnt)
 	{
 		GLuint bufferNames[2];
 		glGenBuffers(2, bufferNames);
@@ -138,22 +138,39 @@ public:
 		indexBuffer = *(bufferNames + 1);
 
 		glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
-		glBufferData(GL_ARRAY_BUFFER, vertexCnt * vertexSize, vertexData, GL_STATIC_DRAW);
+		glBufferData(GL_ARRAY_BUFFER, vertexCnt * vertexSize, vertex_data, GL_STATIC_DRAW);
 		glInterleavedArrays(GL_C3F_V3F, 0, 0);
 		glBindBuffer(GL_ARRAY_BUFFER, 0);
 
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBuffer);
-		glBufferData(GL_ELEMENT_ARRAY_BUFFER, indexCnt * indexSize, indexData, GL_STATIC_DRAW);
+		glBufferData(GL_ELEMENT_ARRAY_BUFFER, indexCnt * indexSize, index_data, GL_STATIC_DRAW);
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+
+		float* test = reinterpret_cast<float*>(vertex_data);
+
+		std::cout << *(test + 0) << std::endl;
+		std::cout << *(test + 1) << std::endl;
+		std::cout << *(test + 2) << std::endl;
+		std::cout << *(test + 3) << std::endl;
+		std::cout << *(test + 4) << std::endl;
+		std::cout << *(test + 5) << std::endl;
 	}
+
+	mesh(const mesh& ) = delete;
+	mesh& operator=(const mesh& ) = delete;
+	mesh(mesh&& ) = delete;
+	mesh& operator=(mesh&& ) = delete;
 
 	~mesh()
 	{
 		GLuint bufferNames[2] = {vertexBuffer, indexBuffer};
 		glDeleteBuffers(2, bufferNames);
+
+		delete[] vertex_data;
+		delete[] index_data;
 	}
 
-	void draw() const
+	void render() const
 	{
 		glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBuffer);
@@ -165,10 +182,178 @@ public:
 	}
 
 private:
+	uint8_t* vertex_data;
+	uint16_t* index_data;
 	GLuint vertexBuffer;
 	GLuint indexBuffer;
 	int indexCnt;
 };
+
+class model_node
+{
+public:
+	model_node()
+	{
+
+	}
+
+	model_node(const model_node& ) = delete;
+	model_node& operator=(const model_node& ) = delete;
+	model_node(model_node&& ) = delete;
+	model_node& operator=(model_node&& ) = delete;
+
+	void render()
+	{
+		model_node* child = first_child;
+
+		while(child)
+		{
+			child->render();
+			child = child->next_sibling;
+		}
+
+		if (m)
+		{
+			m->render();
+		}
+	}
+
+	friend model_node* traverse_assimp_scene(const aiNode* curr, const aiScene* scene);
+
+private:
+	model_node* next_sibling = nullptr;
+	model_node* first_child = nullptr;
+
+	mesh* m = nullptr;
+};
+
+class model
+{
+public:
+	model(model_node* root) : root(root)
+	{
+
+	}
+
+	model(const model& ) = delete;
+	model& operator=(const model& ) = delete;
+
+	model(model&& other)
+	{
+		root = other.root;
+		other.root = nullptr;
+	}
+
+	model& operator=(model&& other)
+	{
+		root = other.root;
+		other.root = nullptr;
+		return *this;
+	}
+
+	~model()
+	{
+		if (root)
+		{
+			delete root;
+		}
+	}
+
+	void render()
+	{
+		if (root)
+		{
+			root->render();
+		}
+	}
+
+private:
+	model_node* root = nullptr;
+};
+
+mesh* load_mesh_from_assimp_node(const aiNode* node, const aiScene* scene)
+{
+	int vertex_count = 0;
+	int index_count = 0;
+
+	for (const unsigned* iter = node->mMeshes; iter < node->mMeshes + node->mNumMeshes; ++iter)
+	{
+		vertex_count += scene->mMeshes[*iter]->mNumVertices;
+		// assume all faces to be triangles
+		index_count += scene->mMeshes[*iter]->mNumFaces * 3;
+		break;
+	}
+
+	if (vertex_count == 0 || index_count == 0)
+	{
+		return nullptr;
+	}
+
+	// not sure how to handle different vertex formats
+	// for the moment give it three floats for position
+	// plus 3 floats for a color
+	int vertex_size = 6 * sizeof(float);
+	uint8_t* vertex_data = new uint8_t[vertex_count * vertex_size];
+	uint8_t* vertex_data_begin = vertex_data;
+	uint16_t* index_data = new uint16_t[index_count];
+	uint16_t* index_data_begin = index_data;
+
+	for (const unsigned* iter = node->mMeshes; iter < node->mMeshes + node->mNumMeshes; ++iter)
+	{
+		for (const aiVector3D* iter2 = scene->mMeshes[*iter]->mVertices;
+			 iter2 < scene->mMeshes[*iter]->mVertices + scene->mMeshes[*iter]->mNumVertices; ++iter2)
+		{
+			*reinterpret_cast<float*>(vertex_data) = 1.0f;
+			vertex_data += 4;
+			*reinterpret_cast<float*>(vertex_data) = 0.0f;
+			vertex_data += 4;
+			*reinterpret_cast<float*>(vertex_data) = 0.0f;
+			vertex_data += 4;
+			*reinterpret_cast<float*>(vertex_data) = iter2->x;
+			vertex_data += 4;
+			*reinterpret_cast<float*>(vertex_data) = iter2->y;
+			vertex_data += 4;
+			*reinterpret_cast<float*>(vertex_data) = iter2->z;
+			vertex_data += 4;
+		}
+
+		for (const aiFace* iter2 = scene->mMeshes[*iter]->mFaces;
+			 iter2 < scene->mMeshes[*iter]->mFaces + scene->mMeshes[*iter]->mNumFaces; ++iter2)
+		{
+			// again, assume all faces to be triangles
+			*index_data = *iter2->mIndices;
+			++index_data;
+			*index_data = *(iter2->mIndices+1);
+			++index_data;
+			*index_data = *(iter2->mIndices+2);
+			++index_data;
+		}
+
+		break;
+	}
+
+	return new mesh(vertex_data_begin, vertex_count, vertex_size, index_data_begin, index_count, sizeof(uint16_t));
+}
+
+model_node* traverse_assimp_scene(const aiNode* curr, const aiScene* scene)
+{
+	model_node* ret = new model_node;
+	ret->m = load_mesh_from_assimp_node(curr, scene);
+	model_node** curr_child = &ret->first_child;
+
+	for (aiNode** iter = curr->mChildren;  iter < curr->mChildren + curr->mNumChildren; ++iter)
+	{
+		*curr_child = traverse_assimp_scene(*iter, scene);
+		curr_child = &((*curr_child)->next_sibling);
+	}
+
+	return ret;
+}
+
+model load_from_assimp_scene(const aiScene* scene)
+{
+	return traverse_assimp_scene(scene->mRootNode, scene);
+}
 
 std::pair<std::vector<vertex>, std::vector<GLushort>> create_circle_mesh_data(int resolution)
 {
@@ -247,8 +432,15 @@ int main()
 
 	auto circleData = create_circle_mesh_data(100);
 
-	mesh circle(circleData.first.data(), circleData.first.size(), sizeof(vertex),
-				circleData.second.data(), circleData.second.size(), sizeof(GLushort));
+//	mesh circle(circleData.first.data(), circleData.first.size(), sizeof(vertex),
+//				circleData.second.data(), circleData.second.size(), sizeof(GLushort));
+
+	model test = load_from_assimp_scene(scene);
+
+	matrix4 mat = translation(vector3(-15.0f, 10.0f, -90.0f));
+	glLoadIdentity();
+	glTranslatef(0.0f, -20.0f, -90.0f);
+	//glLoadMatrixf(mat.elements);
 
 	while(running)
 	{
@@ -262,7 +454,7 @@ int main()
 			}
 		}
 
-		circle.draw();
+		test.render();
 
 		SDL_GL_SwapWindow(window);
 	}
