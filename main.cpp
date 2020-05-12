@@ -194,6 +194,20 @@ public:
 	model_node(model_node&& ) = delete;
 	model_node& operator=(model_node&& ) = delete;
 
+	~model_node()
+	{
+		model_node* child = first_child;
+
+		while(child)
+		{
+			model_node* tmp = child->next_sibling;
+			delete child;
+			child = tmp;
+		}
+
+		delete m;
+	}
+
 	void render()
 	{
 		model_node* child = first_child;
