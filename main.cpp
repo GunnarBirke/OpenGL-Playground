@@ -398,7 +398,7 @@ void resize(int width, int height)
 	glViewport(0, 0, width, height);
 	glMatrixMode(GL_PROJECTION);
 	glLoadIdentity();
-	glFrustum(-right, right, right*aspect_ratio, -right*aspect_ratio, near_plane, far_plane);
+	glFrustum(-right, right, -right*aspect_ratio, right*aspect_ratio, near_plane, far_plane);
 	glMatrixMode(GL_MODELVIEW);
 }
 
@@ -439,7 +439,7 @@ int main()
 
 	matrix4 mat = translation(vector3(-15.0f, 10.0f, -90.0f));
 	glLoadIdentity();
-	glTranslatef(0.0f, -20.0f, -90.0f);
+	glTranslatef(0.0f, 0.0f, -90.0f);
 	//glLoadMatrixf(mat.elements);
 
 	while(running)
