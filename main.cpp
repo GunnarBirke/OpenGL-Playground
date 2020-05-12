@@ -139,21 +139,12 @@ public:
 
 		glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
 		glBufferData(GL_ARRAY_BUFFER, vertexCnt * vertexSize, vertex_data, GL_STATIC_DRAW);
-		glInterleavedArrays(GL_C3F_V3F, 0, 0);
+
 		glBindBuffer(GL_ARRAY_BUFFER, 0);
 
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBuffer);
 		glBufferData(GL_ELEMENT_ARRAY_BUFFER, indexCnt * indexSize, index_data, GL_STATIC_DRAW);
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
-
-		float* test = reinterpret_cast<float*>(vertex_data);
-
-		std::cout << *(test + 0) << std::endl;
-		std::cout << *(test + 1) << std::endl;
-		std::cout << *(test + 2) << std::endl;
-		std::cout << *(test + 3) << std::endl;
-		std::cout << *(test + 4) << std::endl;
-		std::cout << *(test + 5) << std::endl;
 	}
 
 	mesh(const mesh& ) = delete;
@@ -174,6 +165,7 @@ public:
 	{
 		glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBuffer);
+		glInterleavedArrays(GL_C3F_V3F, 0, 0);
 
 		glDrawElements(GL_TRIANGLES, indexCnt, GL_UNSIGNED_SHORT, 0);
 
