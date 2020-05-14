@@ -36,6 +36,29 @@ struct vector3
 	float x, y, z;
 };
 
+struct quaternion
+{
+	quaternion()
+	{
+
+	}
+
+	float w = 0.0f;
+	float x = 0.0f;
+	float y = 0.0f;
+	float z = 0.0f;
+};
+
+quaternion operator * (const quaternion& q1, const quaternion q2)
+{
+	quaternion prod;
+	prod.w = q1.w * q2.w - q1.x * q2.x - q1.y * q2.y - q1.z * q2.z;
+	prod.x = q1.w * q2.x + q1.x * q2.w + q1.y * q2.z - q1.z * q2.y;
+	prod.y = q1.w * q2.y - q1.x * q2.z + q1.y * q2.w + q1.z * q2.x;
+	prod.z = q1.w * q2.z + q1.x * q2.y - q1.y * q2.x + q1.z * q2.w;
+	return prod;
+}
+
 struct matrix4
 {
 	matrix4()
@@ -244,6 +267,17 @@ public:
 	texture* tex = nullptr;
 };
 
+struct animation
+{
+	std::string node_ref;
+	// .x file format and wme both actually use a 32 bit integer for time
+	std::vector<std::pair<double, vector3>> pos_keys;
+	std::vector<std::pair<double, quaternion>> rot_keys;
+	std::vector<std::pair<double, vector3>> scale_keys;
+};
+
+typedef std::pair<std::string, std::vector<animation>> animation_set;
+
 class model_node
 {
 public:
@@ -310,7 +344,8 @@ private:
 class model
 {
 public:
-	model(model_node* root) : root(root)
+	model(model_node* root, const std::vector<animation_set>& anim_sets)
+		: root(root), animation_sets(anim_sets)
 	{
 
 	}
@@ -347,8 +382,19 @@ public:
 		}
 	}
 
+	void update(float delta)
+	{
+
+	}
+
+	void play_anim(const std::string& name)
+	{
+
+	}
+
 private:
 	model_node* root = nullptr;
+	std::vector<animation_set> animation_sets;
 };
 
 texture* load_texture(const char* file)
@@ -506,9 +552,52 @@ model_node* traverse_assimp_scene(const aiNode* curr, const aiScene* scene)
 	return ret;
 }
 
-model load_from_assimp_scene(const aiScene* scene)
+model* load_from_assimp_scene(const aiScene* scene)
 {
-	return traverse_assimp_scene(scene->mRootNode, scene);
+	model_node* root = traverse_assimp_scene(scene->mRootNode, scene);
+	std::vector<animation_set> anim_sets;
+
+	for (aiAnimation** iter = scene->mAnimations; iter < scene->mAnimations + scene->mNumAnimations; ++iter)
+	{
+		anim_sets.resize(anim_sets.size() + 1);
+		anim_sets.back().first = std::string((*iter)->mName.C_Str());
+
+		for (aiNodeAnim** iter2 = (*iter)->mChannels; iter2 < (*iter)->mChannels + (*iter)->mNumChannels; ++iter2)
+		{
+			anim_sets.back().second.push_back(animation());
+			anim_sets.back().second.back().node_ref = std::string((*iter2)->mNodeName.C_Str());
+
+			for (aiVectorKey* iter3 = (*iter2)->mPositionKeys; iter3 < (*iter2)->mPositionKeys + (*iter2)->mNumPositionKeys; ++iter3)
+			{
+				anim_sets.back().second.back().pos_keys.resize(anim_sets.back().second.back().pos_keys.size() + 1);
+				anim_sets.back().second.back().pos_keys.back().first = iter3->mTime;
+				anim_sets.back().second.back().pos_keys.back().second.x = iter3->mValue.x;
+				anim_sets.back().second.back().pos_keys.back().second.y = iter3->mValue.y;
+				anim_sets.back().second.back().pos_keys.back().second.z = iter3->mValue.z;
+			}
+
+			for (aiVectorKey* iter3 = (*iter2)->mScalingKeys; iter3 < (*iter2)->mScalingKeys + (*iter2)->mNumScalingKeys; ++iter3)
+			{
+				anim_sets.back().second.back().scale_keys.resize(anim_sets.back().second.back().scale_keys.size() + 1);
+				anim_sets.back().second.back().scale_keys.back().first = iter3->mTime;
+				anim_sets.back().second.back().scale_keys.back().second.x = iter3->mValue.x;
+				anim_sets.back().second.back().scale_keys.back().second.y = iter3->mValue.y;
+				anim_sets.back().second.back().scale_keys.back().second.z = iter3->mValue.z;
+			}
+
+			for (aiQuatKey* iter3 = (*iter2)->mRotationKeys; iter3 < (*iter2)->mRotationKeys + (*iter2)->mNumRotationKeys; ++iter3)
+			{
+				anim_sets.back().second.back().rot_keys.resize(anim_sets.back().second.back().rot_keys.size() + 1);
+				anim_sets.back().second.back().rot_keys.back().first = iter3->mTime;
+				anim_sets.back().second.back().rot_keys.back().second.w = iter3->mValue.w;
+				anim_sets.back().second.back().rot_keys.back().second.x = iter3->mValue.x;
+				anim_sets.back().second.back().rot_keys.back().second.y = iter3->mValue.y;
+				anim_sets.back().second.back().rot_keys.back().second.z = iter3->mValue.z;
+			}
+		}
+	}
+
+	return new model(root, anim_sets);
 }
 
 std::pair<std::vector<vertex>, std::vector<GLushort>> create_circle_mesh_data(int resolution)
@@ -591,7 +680,7 @@ int main()
 //	mesh circle(circleData.first.data(), circleData.first.size(), sizeof(vertex),
 //				circleData.second.data(), circleData.second.size(), sizeof(GLushort));
 
-	model test = load_from_assimp_scene(scene);
+	model* test = load_from_assimp_scene(scene);
 
 	matrix4 mat = translation(vector3(-15.0f, 10.0f, -90.0f));
 	glLoadIdentity();
@@ -617,10 +706,12 @@ int main()
 		glClearColor(0.2f, 0.4f, 0.2f, 1.0f);
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-		test.render();
+		test->render();
 
 		SDL_GL_SwapWindow(window);
 	}
+
+	delete test;
 
 	SDL_GL_DeleteContext(glContext);
 	SDL_Quit();
