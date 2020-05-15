@@ -36,9 +36,20 @@ struct vector3
 	float x, y, z;
 };
 
+vector3 linear_interpolation(const vector3& v, const vector3& w, double lerp)
+{
+	return vector3((1 - lerp) * v.x + lerp * w.x, (1 - lerp) * v.y + lerp * w.y, (1 - lerp) * v.z + lerp * w.z);
+}
+
 struct quaternion
 {
 	quaternion()
+	{
+
+	}
+
+	quaternion(float w, float x, float y, float z)
+		: w(w), x(x), y(y), z(z)
 	{
 
 	}
@@ -49,6 +60,11 @@ struct quaternion
 	float z = 0.0f;
 };
 
+double quaternion_dot_product(const quaternion& q1, const quaternion& q2)
+{
+	return q1.w * q2.w + q1.x * q2.x + q1.y * q2.y + q1.z * q2.z;
+}
+
 quaternion operator * (const quaternion& q1, const quaternion q2)
 {
 	quaternion prod;
@@ -57,6 +73,16 @@ quaternion operator * (const quaternion& q1, const quaternion q2)
 	prod.y = q1.w * q2.y - q1.x * q2.z + q1.y * q2.w + q1.z * q2.x;
 	prod.z = q1.w * q2.z + q1.x * q2.y - q1.y * q2.x + q1.z * q2.w;
 	return prod;
+}
+
+quaternion spherical_linear_interpolation(const quaternion& q1, const quaternion& q2, float lerp)
+{
+	float theta = std::acos(quaternion_dot_product(q1, q2));
+	float q1_weight = std::sin(theta * (1 - lerp)) / sin(theta);
+	float q2_weight = std::sin(theta * lerp) / sin(theta);
+
+	return quaternion( q1_weight * q1.w + q2_weight * q2.w, q1_weight * q1.x + q2_weight * q2.x,
+					   q1_weight * q1.y + q2_weight * q2.y, q1_weight * q1.z + q2_weight * q2.z);
 }
 
 struct matrix4
@@ -277,17 +303,6 @@ public:
 	texture* tex = nullptr;
 };
 
-struct animation
-{
-	std::string node_ref;
-	// .x file format and wme both actually use a 32 bit integer for time
-	std::vector<std::pair<double, vector3>> pos_keys;
-	std::vector<std::pair<double, quaternion>> rot_keys;
-	std::vector<std::pair<double, vector3>> scale_keys;
-};
-
-typedef std::pair<std::string, std::vector<animation>> animation_set;
-
 class model_node
 {
 public:
@@ -340,6 +355,33 @@ public:
 		}
 	}
 
+	model_node* find(const std::string& name)
+	{
+		if (name == this->name)
+		{
+			return this;
+		}
+
+		for (model_node* child = first_child; child != nullptr; child = child->next_sibling)
+		{
+			model_node* ret = child->find(name);
+
+			if (ret != nullptr)
+			{
+				return ret;
+			}
+		}
+
+		return nullptr;
+	}
+
+	void set_transform_data(const vector3& pos, const quaternion& rot, const vector3& scale)
+	{
+		this->pos = pos;
+		this->rot = rot;
+		this->scale = scale;
+	}
+
 	friend void load_mesh_from_assimp_node(model_node** mesh_node, const aiNode* assimp_node, const aiScene* scene);
 	friend model_node* traverse_assimp_scene(const aiNode* curr, const aiScene* scene);
 
@@ -349,13 +391,155 @@ private:
 
 	mesh* m = nullptr;
 	material* mat = nullptr;
+
+	std::string name;
+
+	vector3 pos;
+	quaternion rot;
+	vector3 scale;
 };
+
+struct animation
+{
+	typedef std::vector<std::pair<double, vector3>> pos_key_list;
+	typedef std::vector<std::pair<double, quaternion>> rot_key_list;
+	typedef std::vector<std::pair<double, vector3>> scale_key_list;
+
+	std::string node_ref;
+	// .x file format and wme both actually use a 32 bit integer for time
+	pos_key_list pos_keys;
+	rot_key_list rot_keys;
+	scale_key_list scale_keys;
+	double local_time = 0.0f;
+
+	void update(double delta, double ticks_per_second, model_node* node)
+	{
+		local_time += delta;
+
+		if (local_time > total_time())
+		{
+			local_time = 0.0;
+		}
+
+		// from wme code
+		local_time *= (ticks_per_second / 1000.0);
+
+		vector3 pos = update_positions(local_time);
+		quaternion rot = update_rotations(local_time);
+		vector3 scale = update_scalings(local_time);
+
+		node->set_transform_data(pos, rot, scale);
+	}
+
+	// this is three times the same algorithm, do something generic here
+	vector3 update_positions(double local_time)
+	{
+		if (pos_keys.empty())
+		{
+			return (vector3(0.0f, 0.0f, 0.0f));
+		}
+
+		pos_key_list::iterator key1;
+		pos_key_list::iterator key2;
+
+		for (pos_key_list::iterator iter = pos_keys.begin(); iter < pos_keys.end(); ++iter)
+		{
+			if (iter->first > local_time)
+			{
+				// wme does something different here, not sure why
+				key1 = iter;
+				key2 = iter + 1;
+			}
+		}
+
+		float lerp = (local_time - key1->first) / (key2->first - key1->first);
+		return linear_interpolation(key1->second, key2->second, lerp);
+	}
+
+	quaternion update_rotations(double local_time)
+	{
+		if (rot_keys.empty())
+		{
+			return quaternion(0.0f, 0.0f, 0.0f, 1.0f);
+		}
+
+		rot_key_list::iterator key1;
+		rot_key_list::iterator key2;
+
+		for (rot_key_list::iterator iter = rot_keys.begin(); iter < rot_keys.end(); ++iter)
+		{
+			if (iter->first > local_time)
+			{
+				// wme does something different here, not sure why
+				key1 = iter;
+				key2 = iter + 1;
+			}
+		}
+
+		float lerp = (local_time - key1->first) / (key2->first - key1->first);
+
+		quaternion q1 (key1->second.w, -key1->second.x, -key1->second.y, -key1->second.z);
+		quaternion q2 (key2->second.w, -key2->second.x, -key2->second.y, -key2->second.z);
+
+		return spherical_linear_interpolation(q1, q2, lerp);
+	}
+
+	vector3 update_scalings(double local_time)
+	{
+		if (scale_keys.size() < 2)
+		{
+			return vector3(1.0f, 1.0, 1.0f);
+		}
+
+		scale_key_list::iterator key1;
+		scale_key_list::iterator key2;
+
+		for (scale_key_list::iterator iter = scale_keys.begin(); iter < scale_keys.end(); ++iter)
+		{
+			if (iter->first > local_time)
+			{
+				// wme does something different here, not sure why
+				key1 = iter;
+				key2 = iter + 1;
+			}
+		}
+
+		float lerp = (local_time - key1->first) / (key2->first - key1->first);
+		return linear_interpolation(key1->second, key2->second, lerp);
+	}
+
+	double total_time()
+	{
+		// wme does the same here, appearently the total time
+		// is not contained in the .x file format
+		double ret = 0.0;
+
+		if (!pos_keys.empty())
+		{
+			ret = std::max(ret, pos_keys.back().first);
+		}
+
+		if (!rot_keys.empty())
+		{
+			ret = std::max(ret, rot_keys.back().first);
+		}
+
+		if (!scale_keys.empty())
+		{
+			ret = std::max(ret, scale_keys.back().first);
+		}
+
+		return ret;
+	}
+};
+
+typedef std::pair<std::string, std::vector<animation>> animation_set;
 
 class model
 {
 public:
-	model(model_node* root, const std::vector<animation_set>& anim_sets)
-		: root(root), animation_sets(anim_sets)
+	model(model_node* root, const std::vector<animation_set>& anim_sets, double ticks_per_second)
+		: root(root), animation_sets(anim_sets), ticks_per_second(ticks_per_second)
 	{
 
 	}
@@ -394,17 +578,44 @@ public:
 
 	void update(float delta)
 	{
+		for (std::vector<animation>::iterator iter = curr_anim->second.begin();
+			 iter != curr_anim->second.end(); ++iter)
+		{
+			model_node* target = find_node(iter->node_ref);
 
+			if (target != nullptr)
+			{
+				iter->update(delta, ticks_per_second, target);
+			}
+		}
 	}
 
 	void play_anim(const std::string& name)
 	{
+		for (std::vector<animation_set>::iterator iter = animation_sets.begin(); iter < animation_sets.end(); ++iter)
+		{
+			if (iter->first == name)
+			{
+				curr_anim = &(*iter);
+			}
+		}
+	}
 
+	model_node* find_node(const std::string& ref)
+	{
+		if (root != nullptr)
+		{
+			return root->find(ref);
+		}
+
+		return nullptr;
 	}
 
 private:
 	model_node* root = nullptr;
 	std::vector<animation_set> animation_sets;
+	animation_set* curr_anim;
+	double ticks_per_second = 4800.0; // x. and wme use an 32-bit integer
 };
 
 texture* load_texture(const char* file)
@@ -589,6 +800,7 @@ model_node* traverse_assimp_scene(const aiNode* curr, const aiScene* scene)
 	}
 
 	load_mesh_from_assimp_node(curr_child, curr, scene);
+	ret->name = curr->mName.C_Str();
 
 	return ret;
 }
@@ -598,10 +810,13 @@ model* load_from_assimp_scene(const aiScene* scene)
 	model_node* root = traverse_assimp_scene(scene->mRootNode, scene);
 	std::vector<animation_set> anim_sets;
 
+	double ticks_per_second = 0.0;
+
 	for (aiAnimation** iter = scene->mAnimations; iter < scene->mAnimations + scene->mNumAnimations; ++iter)
 	{
 		anim_sets.resize(anim_sets.size() + 1);
 		anim_sets.back().first = std::string((*iter)->mName.C_Str());
+		ticks_per_second = (*iter)->mTicksPerSecond;
 
 		for (aiNodeAnim** iter2 = (*iter)->mChannels; iter2 < (*iter)->mChannels + (*iter)->mNumChannels; ++iter2)
 		{
@@ -638,7 +853,7 @@ model* load_from_assimp_scene(const aiScene* scene)
 		}
 	}
 
-	return new model(root, anim_sets);
+	return new model(root, anim_sets, ticks_per_second);
 }
 
 std::pair<std::vector<vertex>, std::vector<GLushort>> create_circle_mesh_data(int resolution)
@@ -732,8 +947,14 @@ int main()
 	glEnable(GL_TEXTURE_2D);
 	glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
 
+	float delta = 0.0f;
+
+	test->play_anim("walk");
+
 	while(running)
 	{
+		uint32_t time_elapsed_begin = SDL_GetTicks();
+
 		if (SDL_PollEvent(&event))
 		{
 			switch (event.type)
@@ -750,6 +971,11 @@ int main()
 		test->render();
 
 		SDL_GL_SwapWindow(window);
+
+		test->update(delta);
+
+		uint32_t time_elapsed_end = SDL_GetTicks();
+		delta = static_cast<float>(time_elapsed_begin - time_elapsed_end) * 1000.0f;
 	}
 
 	delete test;
