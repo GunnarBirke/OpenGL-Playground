@@ -160,6 +160,65 @@ matrix4 uniform_scale(float scale)
 	return m;
 }
 
+matrix4 non_uniform_scale(const vector3& v)
+{
+	matrix4 m;
+	m(0, 0) = v.x;
+	m(1, 1) = v.y;
+	m(2, 2) = v.z;
+	m(3, 3) = 1.0f;
+
+	return m;
+}
+
+matrix4 rotation(const quaternion& q)
+{
+	matrix4 ret;
+
+	ret(0, 0) = 1.0f - 2.0f * (q.y * q.y + q.z * q.z);
+	ret(0, 1) = 2.0f * (q.x * q.y - q.w * q.z);
+	ret(0, 2) = 2.0f * (q.x * q.z + q.w * q.y);
+	ret(0, 3) = 0.0f;
+	ret(1, 0) = 2.0f * (q.x * q.y + q.w * q.z);
+	ret(1, 1) = 1.0f - 2.0f * (q.x * q.x + q.z * q.z);
+	ret(1, 2) = 2.0f * (q.y * q.z - q.w * q.x);
+	ret(1, 3) = 0.0f;
+	ret(2, 0) = 2.0f * (q.x * q.z - q.w * q.y);
+	ret(2, 1) = 2.0f * (q.y * q.z + q.w * q.x);
+	ret(2, 2) = 1.0f - 2.0f * (q.x * q.x + q.y * q.y);
+	ret(2, 3) = 0.0f;
+	ret(3, 0) = 0.0f;
+	ret(3, 1) = 0.0f;
+	ret(3, 2) = 0.0f;
+	ret(3, 3) = 1.0f;
+
+	return ret;
+}
+
+matrix4 identity()
+{
+	matrix4 ret;
+
+	ret(0, 0) = 1.0f;
+	ret(0, 1) = 0.0f;
+	ret(0, 2) = 0.0f;
+	ret(0, 3) = 0.0f;
+	ret(1, 0) = 0.0f;
+	ret(1, 1) = 1.0f;
+	ret(1, 2) = 0.0f;
+	ret(1, 3) = 0.0f;
+	ret(2, 0) = 0.0f;
+	ret(2, 1) = 0.0f;
+	ret(2, 2) = 1.0f;
+	ret(2, 3) = 0.0f;
+	ret(3, 0) = 0.0f;
+	ret(3, 1) = 0.0f;
+	ret(3, 2) = 0.0f;
+	ret(3, 3) = 1.0f;
+
+	return ret;
+}
+
 struct vertex
 {
 	vertex()
@@ -382,6 +441,16 @@ public:
 		this->scale = scale;
 	}
 
+	void update_transform(const matrix4& parent_mat)
+	{
+		transform = non_uniform_scale(pos) * rotation(rot) * translation(pos) * parent_mat;
+
+		for (model_node* child = first_child; child != nullptr; child = child->next_sibling)
+		{
+			child->update_transform(transform);
+		}
+	}
+
 	friend void load_mesh_from_assimp_node(model_node** mesh_node, const aiNode* assimp_node, const aiScene* scene);
 	friend model_node* traverse_assimp_scene(const aiNode* curr, const aiScene* scene);
 
@@ -391,6 +460,9 @@ private:
 
 	mesh* m = nullptr;
 	material* mat = nullptr;
+
+	matrix4 transform = identity();
+	matrix4 original_transform = identity();
 
 	std::string name;
 
@@ -588,6 +660,8 @@ public:
 				iter->update(delta, ticks_per_second, target);
 			}
 		}
+
+		root->update_transform(identity());
 	}
 
 	void play_anim(const std::string& name)
@@ -801,6 +875,23 @@ model_node* traverse_assimp_scene(const aiNode* curr, const aiScene* scene)
 
 	load_mesh_from_assimp_node(curr_child, curr, scene);
 	ret->name = curr->mName.C_Str();
+
+	ret->transform(0, 0) = curr->mTransformation.a1;
+	ret->transform(0, 1) = curr->mTransformation.a2;
+	ret->transform(0, 2) = curr->mTransformation.a3;
+	ret->transform(0, 3) = curr->mTransformation.a4;
+	ret->transform(1, 0) = curr->mTransformation.b1;
+	ret->transform(1, 1) = curr->mTransformation.b2;
+	ret->transform(1, 2) = curr->mTransformation.b3;
+	ret->transform(1, 3) = curr->mTransformation.b4;
+	ret->transform(2, 0) = curr->mTransformation.c1;
+	ret->transform(2, 1) = curr->mTransformation.c2;
+	ret->transform(2, 2) = curr->mTransformation.c3;
+	ret->transform(2, 3) = curr->mTransformation.c4;
+	ret->transform(3, 0) = curr->mTransformation.d1;
+	ret->transform(3, 1) = curr->mTransformation.d2;
+	ret->transform(3, 2) = curr->mTransformation.d3;
+	ret->transform(3, 3) = curr->mTransformation.d4;
 
 	return ret;
 }
