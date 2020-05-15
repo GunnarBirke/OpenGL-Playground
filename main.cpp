@@ -151,11 +151,20 @@ struct vertex
 	vector3 pos;
 };
 
+struct bone
+{
+	matrix4 transform;
+	std::string node_ref;
+	std::vector<std::pair<int, float>> vertices;
+};
+
 class mesh
 {
 public:
-	mesh(uint8_t* vertex_data, int vertexCnt, int vertexSize, uint16_t* index_data, int indexCnt, int indexSize)
-		: vertex_data(vertex_data), index_data(index_data), indexCnt(indexCnt)
+	mesh(uint8_t* vertex_data, int vertexCnt, int vertexSize,
+		 uint16_t* index_data, int indexCnt, int indexSize,
+		 const std::vector<bone>& bones)
+		: vertex_data(vertex_data), index_data(index_data), indexCnt(indexCnt), bones(bones)
 	{
 		GLuint bufferNames[2];
 		glGenBuffers(2, bufferNames);
@@ -204,6 +213,7 @@ private:
 	GLuint vertexBuffer;
 	GLuint indexBuffer;
 	int indexCnt;
+	std::vector<bone> bones;
 };
 
 class texture
@@ -528,9 +538,40 @@ void load_mesh_from_assimp_node(model_node** mesh_node, const aiNode* assimp_nod
 			mat->tex = load_texture(texture_path.C_Str());
 		}
 
+		std::vector<bone> bones;
+
+		for (auto iter2 = scene->mMeshes[*iter]->mBones; iter2 < scene->mMeshes[*iter]->mBones + scene->mMeshes[*iter]->mNumBones; ++iter2)
+		{
+			bones.push_back(bone());
+			bones.back().node_ref = (*iter2)->mName.C_Str();
+
+			for (auto iter3 = (*iter2)->mWeights; iter3 < (*iter2)->mWeights + (*iter2)->mNumWeights; ++iter3)
+			{
+				bones.back().vertices.push_back(std::make_pair(iter3->mVertexId, iter3->mWeight));
+			}
+
+			bones.back().transform.operator()(0, 0) = (*iter2)->mOffsetMatrix.a1;
+			bones.back().transform.operator()(0, 1) = (*iter2)->mOffsetMatrix.a2;
+			bones.back().transform.operator()(0, 2) = (*iter2)->mOffsetMatrix.a3;
+			bones.back().transform.operator()(0, 3) = (*iter2)->mOffsetMatrix.a4;
+			bones.back().transform.operator()(1, 0) = (*iter2)->mOffsetMatrix.b1;
+			bones.back().transform.operator()(1, 1) = (*iter2)->mOffsetMatrix.b2;
+			bones.back().transform.operator()(1, 2) = (*iter2)->mOffsetMatrix.b3;
+			bones.back().transform.operator()(1, 3) = (*iter2)->mOffsetMatrix.b4;
+			bones.back().transform.operator()(2, 0) = (*iter2)->mOffsetMatrix.c1;
+			bones.back().transform.operator()(2, 1) = (*iter2)->mOffsetMatrix.c2;
+			bones.back().transform.operator()(2, 2) = (*iter2)->mOffsetMatrix.c3;
+			bones.back().transform.operator()(2, 3) = (*iter2)->mOffsetMatrix.c4;
+			bones.back().transform.operator()(3, 0) = (*iter2)->mOffsetMatrix.d1;
+			bones.back().transform.operator()(3, 1) = (*iter2)->mOffsetMatrix.d2;
+			bones.back().transform.operator()(3, 2) = (*iter2)->mOffsetMatrix.d3;
+			bones.back().transform.operator()(3, 3) = (*iter2)->mOffsetMatrix.d4;
+		}
+
 		*mesh_node = new model_node;
 		(*mesh_node)->m = new mesh(vertex_data_begin, vertex_count, vertex_size,
-								   index_data_begin, index_count, sizeof(uint16_t));
+								   index_data_begin, index_count, sizeof(uint16_t),
+								   bones);
 		(*mesh_node)->mat = mat;
 		mesh_node = &(*mesh_node)->next_sibling;
 	}
