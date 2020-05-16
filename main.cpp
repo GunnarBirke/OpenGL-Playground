@@ -62,7 +62,13 @@ struct quaternion
 
 double quaternion_dot_product(const quaternion& q1, const quaternion& q2)
 {
-	return q1.w * q2.w + q1.x * q2.x + q1.y * q2.y + q1.z * q2.z;
+	float ret =  q1.w * q2.w + q1.x * q2.x + q1.y * q2.y + q1.z * q2.z;
+	return ret;
+}
+
+double abs_quaternion(const quaternion& q)
+{
+	return std::sqrt(q.w * q.w + q.x * q.x + q.y * q.y + q.z * q.z);
 }
 
 quaternion operator * (const quaternion& q1, const quaternion q2)
@@ -77,7 +83,20 @@ quaternion operator * (const quaternion& q1, const quaternion q2)
 
 quaternion spherical_linear_interpolation(const quaternion& q1, const quaternion& q2, float lerp)
 {
-	float theta = std::acos(quaternion_dot_product(q1, q2));
+	float tmp = quaternion_dot_product(q1, q2) / ((abs_quaternion(q1) * abs_quaternion(q2)));
+
+	if (tmp > 1.0f)
+	{
+		tmp = 1.0f;
+	}
+
+	float theta = std::acos(tmp);
+
+	if (theta > 0.000001f || theta < 0.000001f)
+	{
+		return q1;
+	}
+
 	float q1_weight = std::sin(theta * (1 - lerp)) / sin(theta);
 	float q2_weight = std::sin(theta * lerp) / sin(theta);
 
@@ -121,9 +140,9 @@ struct matrix4
 
 vector3 transform_vector(const matrix4& m, const vector3& v)
 {
-	return vector3(m(0, 0) * v.x + m(0, 1) * v.y + m(0, 2) * v.z + m(3, 0),
-				   m(1, 0) * v.x + m(1, 1) * v.y + m(1, 2) * v.z + m(3, 1),
-				   m(2, 0) * v.x + m(2, 1) * v.y + m(2, 2) * v.z + m(3, 2));
+	return vector3(m(0, 0) * v.x + m(0, 1) * v.y + m(0, 2) * v.z + m(0, 3),
+				   m(1, 0) * v.x + m(1, 1) * v.y + m(1, 2) * v.z + m(1, 3),
+				   m(2, 0) * v.x + m(2, 1) * v.y + m(2, 2) * v.z + m(2, 3));
 }
 
 matrix4 operator * (const matrix4& m1, const matrix4& m2)
@@ -149,9 +168,9 @@ matrix4 translation(const vector3& position)
 	m(2, 2) = 1.0f;
 	m(3, 3) = 1.0f;
 
-	m(3, 0) = position.x;
-	m(3, 1) = position.y;
-	m(3, 2) = position.z;
+	m(0, 3) = position.x;
+	m(1, 3) = position.y;
+	m(2, 3) = position.z;
 
 	return m;
 }
@@ -255,7 +274,7 @@ class model_node;
 class mesh
 {
 public:
-	mesh(uint8_t* vertex_data, int vertexCnt, int vertexSize,
+	mesh(uint8_t* vertex_data, int vertex_cnt, int vertex_size,
 		 uint16_t* index_data, int indexCnt, int indexSize,
 		 const std::vector<bone>& bones)
 		: vertex_data(vertex_data), vertex_cnt(vertex_cnt), vertex_size(vertex_size),
@@ -267,7 +286,7 @@ public:
 		indexBuffer = *(bufferNames + 1);
 
 		glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
-		glBufferData(GL_ARRAY_BUFFER, vertexCnt * vertexSize, vertex_data, GL_STATIC_DRAW);
+		glBufferData(GL_ARRAY_BUFFER, vertex_cnt * vertex_size, vertex_data, GL_STATIC_DRAW);
 
 		glBindBuffer(GL_ARRAY_BUFFER, 0);
 
@@ -302,7 +321,7 @@ public:
 		glBindBuffer(GL_ARRAY_BUFFER, 0);
 	}
 
-	void update(model_node* root);
+	void update(model_node* root, const matrix4& global_inverse);
 
 private:
 	uint8_t* vertex_data;
@@ -457,7 +476,7 @@ public:
 
 	void update_transform(const matrix4& parent_mat)
 	{
-		transform = non_uniform_scale(pos) * rotation(rot) * translation(pos) * parent_mat;
+		transform = parent_mat * original_transform * translation(pos) * rotation(rot) * non_uniform_scale(scale);
 
 		for (model_node* child = first_child; child != nullptr; child = child->next_sibling)
 		{
@@ -470,16 +489,16 @@ public:
 		return transform;
 	}
 
-	void update_meshes(model_node* root)
+	void update_meshes(model_node* root, const matrix4& global_inverse)
 	{
 		for (model_node* child = first_child; child != nullptr; child = child->next_sibling)
 		{
-			child->update_meshes(root);
+			child->update_meshes(root, global_inverse);
 		}
 
 		if (m != nullptr)
 		{
-			m->update(root);
+			m->update(root, global_inverse);
 		}
 	}
 
@@ -503,7 +522,7 @@ private:
 	vector3 scale;
 };
 
-void mesh::update(model_node* root)
+void mesh::update(model_node* root, const matrix4& global_inverse)
 {
 	uint8_t* transformed_vertex_data = new uint8_t[vertex_cnt * vertex_size];
 
@@ -521,13 +540,15 @@ void mesh::update(model_node* root)
 	{
 		model_node* bone_node = root->find(iter->node_ref);
 
-		matrix4 transform = bone_node->get_transform() * iter->transform;
+		matrix4 transform = global_inverse * bone_node->get_transform() * iter->transform;
+		//matrix4 transform = bone_node->get_transform();
+		//matrix4 transform = identity();
 
 		for (std::vector<std::pair<int, float>>::iterator iter2 = iter->vertices.begin();
 			 iter2 != iter->vertices.end(); ++iter2)
 		{
-			vector3* curr_vertex = reinterpret_cast<vector3*>(vertex_data + iter2->first * vertex_size);
-			vector3* transformed_vertex = reinterpret_cast<vector3*>(transformed_vertex_data + iter2->first * vertex_size);
+			vector3* curr_vertex = reinterpret_cast<vector3*>(vertex_data + 8 + iter2->first * vertex_size);
+			vector3* transformed_vertex = reinterpret_cast<vector3*>(transformed_vertex_data + 8 + iter2->first * vertex_size);
 
 			vector3 tmp = transform_vector(transform, *curr_vertex);
 
@@ -536,6 +557,12 @@ void mesh::update(model_node* root)
 			transformed_vertex->z += iter2->second * tmp.z;
 		}
 	}
+
+	glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
+	glBufferData(GL_ARRAY_BUFFER, vertex_cnt * vertex_size, transformed_vertex_data, GL_STATIC_DRAW);
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+	delete[] transformed_vertex_data;
 }
 
 struct animation
@@ -551,18 +578,8 @@ struct animation
 	scale_key_list scale_keys;
 	double local_time = 0.0f;
 
-	void update(double delta, double ticks_per_second, model_node* node)
+	void update(double local_time, model_node* node)
 	{
-		local_time += delta;
-
-		if (local_time > total_time())
-		{
-			local_time = 0.0;
-		}
-
-		// from wme code
-		local_time *= (ticks_per_second / 1000.0);
-
 		vector3 pos = update_positions(local_time);
 		quaternion rot = update_rotations(local_time);
 		vector3 scale = update_scalings(local_time);
@@ -573,49 +590,61 @@ struct animation
 	// this is three times the same algorithm, do something generic here
 	vector3 update_positions(double local_time)
 	{
-		if (pos_keys.empty())
+		if (pos_keys.size () < 2)
 		{
 			return (vector3(0.0f, 0.0f, 0.0f));
 		}
 
-		pos_key_list::iterator key1;
-		pos_key_list::iterator key2;
+		pos_key_list::iterator key1 = pos_keys.end();
+		pos_key_list::iterator key2 = pos_keys.end();
 
 		for (pos_key_list::iterator iter = pos_keys.begin(); iter < pos_keys.end(); ++iter)
 		{
-			if (iter->first > local_time)
+			if (iter->first / 1000.0f > local_time)
 			{
 				// wme does something different here, not sure why
 				key1 = iter;
 				key2 = iter + 1;
+				break;
 			}
 		}
 
-		float lerp = (local_time - key1->first) / (key2->first - key1->first);
+		if (key1 == pos_keys.end() || key2 == pos_keys.end())
+		{
+			return pos_keys.back().second;
+		}
+
+		float lerp = (key1->first - local_time) / (key2->first - key1->first);
 		return linear_interpolation(key1->second, key2->second, lerp);
 	}
 
 	quaternion update_rotations(double local_time)
 	{
-		if (rot_keys.empty())
+		if (rot_keys.size() < 2)
 		{
 			return quaternion(0.0f, 0.0f, 0.0f, 1.0f);
 		}
 
-		rot_key_list::iterator key1;
-		rot_key_list::iterator key2;
+		rot_key_list::iterator key1 = rot_keys.end();
+		rot_key_list::iterator key2 = rot_keys.end();
 
 		for (rot_key_list::iterator iter = rot_keys.begin(); iter < rot_keys.end(); ++iter)
 		{
-			if (iter->first > local_time)
+			if (iter->first / 1000.0f > local_time)
 			{
 				// wme does something different here, not sure why
 				key1 = iter;
 				key2 = iter + 1;
+				break;
 			}
 		}
 
-		float lerp = (local_time - key1->first) / (key2->first - key1->first);
+		if (key1 == rot_keys.end() || key2 == rot_keys.end())
+		{
+			return rot_keys.back().second;
+		}
+
+		float lerp = (key1->first - local_time) / (key2->first - key1->first);
 
 		quaternion q1 (key1->second.w, -key1->second.x, -key1->second.y, -key1->second.z);
 		quaternion q2 (key2->second.w, -key2->second.x, -key2->second.y, -key2->second.z);
@@ -640,10 +669,11 @@ struct animation
 				// wme does something different here, not sure why
 				key1 = iter;
 				key2 = iter + 1;
+				break;
 			}
 		}
 
-		float lerp = (local_time - key1->first) / (key2->first - key1->first);
+		float lerp = (key1->first - local_time) / (key2->first - key1->first);
 		return linear_interpolation(key1->second, key2->second, lerp);
 	}
 
@@ -677,8 +707,8 @@ typedef std::pair<std::string, std::vector<animation>> animation_set;
 class model
 {
 public:
-	model(model_node* root, const std::vector<animation_set>& anim_sets, double ticks_per_second)
-		: root(root), animation_sets(anim_sets), ticks_per_second(ticks_per_second)
+	model(model_node* root, matrix4 global_inverse, const std::vector<animation_set>& anim_sets, double ticks_per_second)
+		: root(root), global_inverse(global_inverse), animation_sets(anim_sets), ticks_per_second(ticks_per_second)
 	{
 
 	}
@@ -717,6 +747,14 @@ public:
 
 	void update(float delta)
 	{
+		local_time += delta;
+		//local_time *= (ticks_per_second / 1000.0);
+
+		if (local_time > 4800.0 / 1000.0)
+		{
+			local_time = 0.0;
+		}
+
 		for (std::vector<animation>::iterator iter = curr_anim->second.begin();
 			 iter != curr_anim->second.end(); ++iter)
 		{
@@ -724,12 +762,12 @@ public:
 
 			if (target != nullptr)
 			{
-				iter->update(delta, ticks_per_second, target);
+				iter->update(local_time, target);
 			}
 		}
 
 		root->update_transform(identity());
-		root->update_meshes(root);
+		root->update_meshes(root, global_inverse);
 	}
 
 	void play_anim(const std::string& name)
@@ -755,9 +793,11 @@ public:
 
 private:
 	model_node* root = nullptr;
+	matrix4 global_inverse;
 	std::vector<animation_set> animation_sets;
 	animation_set* curr_anim;
 	double ticks_per_second = 4800.0; // x. and wme use an 32-bit integer
+	float local_time = 0.0f;
 };
 
 texture* load_texture(const char* file)
@@ -791,6 +831,47 @@ texture* load_texture(const char* file)
 	stbi_image_free(data);
 	delete[] data_fixed;
 	return tex;
+}
+
+matrix4 convert_assimp_matrix(const aiMatrix4x4& mat)
+{
+	matrix4 ret;
+
+//	ret(0, 0) = mat.a1;
+//	ret(0, 1) = mat.b1;
+//	ret(0, 2) = mat.c1;
+//	ret(0, 3) = mat.d1;
+//	ret(1, 0) = mat.a2;
+//	ret(1, 1) = mat.b2;
+//	ret(1, 2) = mat.c2;
+//	ret(1, 3) = mat.d2;
+//	ret(2, 0) = mat.a3;
+//	ret(2, 1) = mat.b3;
+//	ret(2, 2) = mat.c3;
+//	ret(2, 3) = mat.d3;
+//	ret(3, 0) =	mat.a4;
+//	ret(3, 1) = mat.b4;
+//	ret(3, 2) = mat.c4;
+//	ret(3, 3) = mat.d4;
+
+	ret(0, 0) = mat.a1;
+	ret(0, 1) = mat.a2;
+	ret(0, 2) = mat.a3;
+	ret(0, 3) = mat.a4;
+	ret(1, 0) = mat.b1;
+	ret(1, 1) = mat.b2;
+	ret(1, 2) = mat.b3;
+	ret(1, 3) = mat.b4;
+	ret(2, 0) = mat.c1;
+	ret(2, 1) = mat.c2;
+	ret(2, 2) = mat.c3;
+	ret(2, 3) = mat.c4;
+	ret(3, 0) =	mat.d1;
+	ret(3, 1) = mat.d2;
+	ret(3, 2) = mat.d3;
+	ret(3, 3) = mat.d4;
+
+	return ret;
 }
 
 void load_mesh_from_assimp_node(model_node** mesh_node, const aiNode* assimp_node, const aiScene* scene)
@@ -903,22 +984,7 @@ void load_mesh_from_assimp_node(model_node** mesh_node, const aiNode* assimp_nod
 				bones.back().vertices.push_back(std::make_pair(iter3->mVertexId, iter3->mWeight));
 			}
 
-			bones.back().transform.operator()(0, 0) = (*iter2)->mOffsetMatrix.a1;
-			bones.back().transform.operator()(0, 1) = (*iter2)->mOffsetMatrix.a2;
-			bones.back().transform.operator()(0, 2) = (*iter2)->mOffsetMatrix.a3;
-			bones.back().transform.operator()(0, 3) = (*iter2)->mOffsetMatrix.a4;
-			bones.back().transform.operator()(1, 0) = (*iter2)->mOffsetMatrix.b1;
-			bones.back().transform.operator()(1, 1) = (*iter2)->mOffsetMatrix.b2;
-			bones.back().transform.operator()(1, 2) = (*iter2)->mOffsetMatrix.b3;
-			bones.back().transform.operator()(1, 3) = (*iter2)->mOffsetMatrix.b4;
-			bones.back().transform.operator()(2, 0) = (*iter2)->mOffsetMatrix.c1;
-			bones.back().transform.operator()(2, 1) = (*iter2)->mOffsetMatrix.c2;
-			bones.back().transform.operator()(2, 2) = (*iter2)->mOffsetMatrix.c3;
-			bones.back().transform.operator()(2, 3) = (*iter2)->mOffsetMatrix.c4;
-			bones.back().transform.operator()(3, 0) = (*iter2)->mOffsetMatrix.d1;
-			bones.back().transform.operator()(3, 1) = (*iter2)->mOffsetMatrix.d2;
-			bones.back().transform.operator()(3, 2) = (*iter2)->mOffsetMatrix.d3;
-			bones.back().transform.operator()(3, 3) = (*iter2)->mOffsetMatrix.d4;
+			bones.back().transform = convert_assimp_matrix((*iter2)->mOffsetMatrix);
 		}
 
 		*mesh_node = new model_node;
@@ -944,22 +1010,8 @@ model_node* traverse_assimp_scene(const aiNode* curr, const aiScene* scene)
 	load_mesh_from_assimp_node(curr_child, curr, scene);
 	ret->name = curr->mName.C_Str();
 
-	ret->transform(0, 0) = curr->mTransformation.a1;
-	ret->transform(0, 1) = curr->mTransformation.a2;
-	ret->transform(0, 2) = curr->mTransformation.a3;
-	ret->transform(0, 3) = curr->mTransformation.a4;
-	ret->transform(1, 0) = curr->mTransformation.b1;
-	ret->transform(1, 1) = curr->mTransformation.b2;
-	ret->transform(1, 2) = curr->mTransformation.b3;
-	ret->transform(1, 3) = curr->mTransformation.b4;
-	ret->transform(2, 0) = curr->mTransformation.c1;
-	ret->transform(2, 1) = curr->mTransformation.c2;
-	ret->transform(2, 2) = curr->mTransformation.c3;
-	ret->transform(2, 3) = curr->mTransformation.c4;
-	ret->transform(3, 0) = curr->mTransformation.d1;
-	ret->transform(3, 1) = curr->mTransformation.d2;
-	ret->transform(3, 2) = curr->mTransformation.d3;
-	ret->transform(3, 3) = curr->mTransformation.d4;
+	ret->transform = convert_assimp_matrix(curr->mTransformation);
+	ret->original_transform = ret->transform;
 
 	return ret;
 }
@@ -969,6 +1021,10 @@ model* load_from_assimp_scene(const aiScene* scene)
 	model_node* root = traverse_assimp_scene(scene->mRootNode, scene);
 	std::vector<animation_set> anim_sets;
 
+	aiMatrix4x4 ai_global_inverse = scene->mRootNode->mTransformation.Inverse();
+	matrix4 global_inverse;
+
+	global_inverse = convert_assimp_matrix(ai_global_inverse);
 	double ticks_per_second = 0.0;
 
 	for (aiAnimation** iter = scene->mAnimations; iter < scene->mAnimations + scene->mNumAnimations; ++iter)
@@ -1012,7 +1068,7 @@ model* load_from_assimp_scene(const aiScene* scene)
 		}
 	}
 
-	return new model(root, anim_sets, ticks_per_second);
+	return new model(root, global_inverse, anim_sets, ticks_per_second);
 }
 
 std::pair<std::vector<vertex>, std::vector<GLushort>> create_circle_mesh_data(int resolution)
@@ -1052,7 +1108,7 @@ void resize(int width, int height)
 	float horizontal_view_angle = M_PI * 0.5f;
 	float aspect_ratio = float(height) / float(width);
 	float near_plane = 1.0f;
-	float far_plane = 100.0f;
+	float far_plane = 1000.0f;
 	float right = near_plane * tanf(horizontal_view_angle * 0.5f);
 
 	glViewport(0, 0, width, height);
@@ -1099,7 +1155,7 @@ int main()
 
 	matrix4 mat = translation(vector3(-15.0f, 10.0f, -90.0f));
 	glLoadIdentity();
-	glTranslatef(0.0f, 0.0f, -90.0f);
+	glTranslatef(0.0f, -40.0f, -100.0f);
 	//glLoadMatrixf(mat.elements);
 
 	glEnable(GL_DEPTH_TEST);
@@ -1134,7 +1190,7 @@ int main()
 		test->update(delta);
 
 		uint32_t time_elapsed_end = SDL_GetTicks();
-		delta = static_cast<float>(time_elapsed_begin - time_elapsed_end) * 1000.0f;
+		delta = static_cast<float>(time_elapsed_end - time_elapsed_begin) / 1000.0f;
 	}
 
 	delete test;
