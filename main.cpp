@@ -119,6 +119,13 @@ struct matrix4
 	float elements[16];
 };
 
+vector3 transform_vector(const matrix4& m, const vector3& v)
+{
+	return vector3(m(0, 0) * v.x + m(0, 1) * v.y + m(0, 2) * v.z + m(3, 0),
+				   m(1, 0) * v.x + m(1, 1) * v.y + m(1, 2) * v.z + m(3, 1),
+				   m(2, 0) * v.x + m(2, 1) * v.y + m(2, 2) * v.z + m(3, 2));
+}
+
 matrix4 operator * (const matrix4& m1, const matrix4& m2)
 {
 	matrix4 res;
@@ -243,13 +250,16 @@ struct bone
 	std::vector<std::pair<int, float>> vertices;
 };
 
+class model_node;
+
 class mesh
 {
 public:
 	mesh(uint8_t* vertex_data, int vertexCnt, int vertexSize,
 		 uint16_t* index_data, int indexCnt, int indexSize,
 		 const std::vector<bone>& bones)
-		: vertex_data(vertex_data), index_data(index_data), indexCnt(indexCnt), bones(bones)
+		: vertex_data(vertex_data), vertex_cnt(vertex_cnt), vertex_size(vertex_size),
+		  index_data(index_data), indexCnt(indexCnt), bones(bones)
 	{
 		GLuint bufferNames[2];
 		glGenBuffers(2, bufferNames);
@@ -292,8 +302,12 @@ public:
 		glBindBuffer(GL_ARRAY_BUFFER, 0);
 	}
 
+	void update(model_node* root);
+
 private:
 	uint8_t* vertex_data;
+	int vertex_cnt;
+	int vertex_size;
 	uint16_t* index_data;
 	GLuint vertexBuffer;
 	GLuint indexBuffer;
@@ -451,6 +465,24 @@ public:
 		}
 	}
 
+	matrix4 get_transform() const
+	{
+		return transform;
+	}
+
+	void update_meshes(model_node* root)
+	{
+		for (model_node* child = first_child; child != nullptr; child = child->next_sibling)
+		{
+			child->update_meshes(root);
+		}
+
+		if (m != nullptr)
+		{
+			m->update(root);
+		}
+	}
+
 	friend void load_mesh_from_assimp_node(model_node** mesh_node, const aiNode* assimp_node, const aiScene* scene);
 	friend model_node* traverse_assimp_scene(const aiNode* curr, const aiScene* scene);
 
@@ -470,6 +502,41 @@ private:
 	quaternion rot;
 	vector3 scale;
 };
+
+void mesh::update(model_node* root)
+{
+	uint8_t* transformed_vertex_data = new uint8_t[vertex_cnt * vertex_size];
+
+	std::copy(vertex_data, vertex_data + vertex_cnt * vertex_size, transformed_vertex_data);
+
+	for (int i = 8; i < vertex_cnt * vertex_size; i += vertex_size)
+	{
+		vector3* tmp = reinterpret_cast<vector3*>(transformed_vertex_data + i);
+		tmp->x = 0.0f;
+		tmp->y = 0.0f;
+		tmp->y = 0.0f;
+	}
+
+	for (std::vector<bone>::iterator iter = bones.begin(); iter != bones.end(); ++iter)
+	{
+		model_node* bone_node = root->find(iter->node_ref);
+
+		matrix4 transform = bone_node->get_transform() * iter->transform;
+
+		for (std::vector<std::pair<int, float>>::iterator iter2 = iter->vertices.begin();
+			 iter2 != iter->vertices.end(); ++iter2)
+		{
+			vector3* curr_vertex = reinterpret_cast<vector3*>(vertex_data + iter2->first * vertex_size);
+			vector3* transformed_vertex = reinterpret_cast<vector3*>(transformed_vertex_data + iter2->first * vertex_size);
+
+			vector3 tmp = transform_vector(transform, *curr_vertex);
+
+			transformed_vertex->x += iter2->second * tmp.x;
+			transformed_vertex->y += iter2->second * tmp.y;
+			transformed_vertex->z += iter2->second * tmp.z;
+		}
+	}
+}
 
 struct animation
 {
@@ -662,6 +729,7 @@ public:
 		}
 
 		root->update_transform(identity());
+		root->update_meshes(root);
 	}
 
 	void play_anim(const std::string& name)
